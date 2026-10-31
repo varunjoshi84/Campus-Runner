@@ -28,7 +28,7 @@ class AppContainer(context: Context) {
         .build()
 
     private val retrofit = Retrofit.Builder()
-        .baseUrl("http://10.0.2.2:3000/")
+        .baseUrl("https://bats-backfire-rebuff.ngrok-free.dev/")
         .client(okHttpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()

@@ -9,14 +9,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.campusrunner.data.repository.AuthRepository
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,20 +37,35 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    fun devLogin(email: String, name: String?, onLoggedIn: () -> Unit) {
-        if (email.isBlank()) {
-            _errorMessage.value = "Email cannot be blank"
-            return
-        }
+    fun setErrorMessage(message: String?) {
+        _errorMessage.value = message
+    }
+
+    fun googleLogin(idToken: String, onLoggedIn: () -> Unit) {
         CoroutineScope(Dispatchers.Main).launch {
             _isLoading.value = true
             _errorMessage.value = null
-            val result = authRepository.devLogin(email, name)
+            val result = authRepository.googleLogin(idToken)
             _isLoading.value = false
             if (result.isSuccess) {
                 onLoggedIn()
             } else {
-                _errorMessage.value = result.exceptionOrNull()?.message ?: "Login failed"
+                _errorMessage.value = result.exceptionOrNull()?.message ?: "Google login failed"
+            }
+        }
+    }
+
+    fun quickDemoLogin(onLoggedIn: () -> Unit) {
+        CoroutineScope(Dispatchers.Main).launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            // Instant dev login for testing without Google Play Services restrictions
+            val result = authRepository.devLogin("varun.joshi@lpu.in", "Varun Joshi")
+            _isLoading.value = false
+            if (result.isSuccess) {
+                onLoggedIn()
+            } else {
+                _errorMessage.value = "Quick login failed"
             }
         }
     }
@@ -70,8 +91,8 @@ fun LoginScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    var email by remember { mutableStateOf("varun.joshi@lpu.in") }
-    var name by remember { mutableStateOf("Varun Joshi") }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -118,43 +139,52 @@ fun LoginScreen(
                 )
             }
 
-            // Input fields & Continue with Google
+            // Google Sign-In & Quick Demo Login Buttons
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Campus Email") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
                 if (errorMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
+                // Continue with Google Button
                 Button(
-                    onClick = { viewModel.devLogin(email, name, onLoggedIn) },
+                    onClick = {
+                        coroutineScope.launch {
+                            try {
+                                val credentialManager = CredentialManager.create(context)
+                                val googleIdOption = GetGoogleIdOption.Builder()
+                                    .setServerClientId("182329908275-db65977bdahlhsar4h3ulath1nkea02p.apps.googleusercontent.com")
+                                    .setFilterByAuthorizedAccounts(false)
+                                    .build()
+
+                                val request = GetCredentialRequest.Builder()
+                                    .addCredentialOption(googleIdOption)
+                                    .build()
+
+                                val result = credentialManager.getCredential(context, request)
+                                val credential = result.credential
+                                if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                                    val idToken = googleIdTokenCredential.idToken
+                                    viewModel.googleLogin(idToken, onLoggedIn)
+                                } else {
+                                    viewModel.setErrorMessage("Unexpected credential type")
+                                }
+                            } catch (e: Exception) {
+                                viewModel.setErrorMessage("Google Sign-In: ${e.localizedMessage}")
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
-                    shape = RoundedCornerShape(26.dp)
+                    shape = RoundedCornerShape(26.dp),
+                    enabled = !isLoading
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFFEA580C))
@@ -175,7 +205,25 @@ fun LoginScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Quick Demo Login Button (Bypasses Google Play Services signature/device mismatch issues)
+                OutlinedButton(
+                    onClick = { viewModel.quickDemoLogin(onLoggedIn) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(26.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEA580C))
+                ) {
+                    Text(
+                        text = "⚡ Quick Sign-In (Demo Mode)",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(36.dp))
             }
         }
     }
