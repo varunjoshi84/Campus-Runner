@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
-const db = require('../db');
+const { Request, Run, User, Op } = require('../models');
 
 const STATUSES = ['ACCEPTED', 'BOUGHT', 'DELIVERED', 'CANCELLED'];
 
@@ -11,57 +11,139 @@ router.post('/', auth, async (req, res) => {
     return res.status(400).json({ error: 'runId, item, tip required' });
   }
 
-  const { rows } = await db.query(
-    `INSERT INTO requests (run_id, requester_id, item, tip)
-     SELECT r.id, $2, $3, $4 FROM runs r
-     WHERE r.id = $1 AND r.active AND r.expires_at > now() AND r.runner_id <> $2
-     RETURNING *`,
-    [runId, req.uid, item, tip]
-  );
-  if (!rows[0]) return res.status(400).json({ error: 'Run not available' });
-  res.status(201).json(rows[0]);
+  // Ensure target run exists, is active, not expired, and runner is not self
+  const run = await Run.findOne({
+    where: {
+      id: runId,
+      active: true,
+      expiresAt: { [Op.gt]: new Date() },
+      runnerId: { [Op.ne]: req.uid },
+    },
+  });
+
+  if (!run) {
+    return res.status(400).json({ error: 'Run not available' });
+  }
+
+  const request = await Request.create({
+    runId,
+    requesterId: req.uid,
+    item,
+    tip,
+    status: 'OPEN',
+  });
+
+  res.status(201).json(request);
 });
 
-
+// GET /requests/incoming -> requests for the runner's active runs
 router.get('/incoming', auth, async (req, res) => {
-  const { rows } = await db.query(
-    `SELECT q.id, q.run_id, q.item, q.tip, q.status, q.created_at,
-            r.store_name, u.name AS requester_name, u.phone AS requester_phone
-     FROM requests q
-     JOIN runs r  ON r.id = q.run_id
-     JOIN users u ON u.id = q.requester_id
-     WHERE r.runner_id = $1
-     ORDER BY q.created_at DESC`, [req.uid]);
-  res.json(rows);
+  const requests = await Request.findAll({
+    include: [
+      {
+        model: Run,
+        as: 'run',
+        where: { runnerId: req.uid },
+        attributes: ['storeName'],
+      },
+      {
+        model: User,
+        as: 'requester',
+        attributes: ['name', 'phone'],
+      },
+    ],
+    order: [['createdAt', 'DESC']],
+  });
+
+  const response = requests.map((q) => ({
+    id: q.id,
+    runId: q.runId,
+    item: q.item,
+    tip: q.tip,
+    status: q.status,
+    createdAt: q.createdAt,
+    storeName: q.run ? q.run.storeName : null,
+    requesterName: q.requester ? q.requester.name : null,
+    requesterPhone: q.requester ? q.requester.phone : null,
+  }));
+
+  res.json(response);
 });
 
+// GET /requests/mine -> requests made by the current user
 router.get('/mine', auth, async (req, res) => {
-  const { rows } = await db.query(
-    `SELECT q.id, q.run_id, q.item, q.tip, q.status, q.created_at,
-            r.store_name, u.name AS runner_name,
-            CASE WHEN q.status <> 'OPEN' THEN u.phone END AS runner_phone
-     FROM requests q
-     JOIN runs r  ON r.id = q.run_id
-     JOIN users u ON u.id = r.runner_id
-     WHERE q.requester_id = $1
-     ORDER BY q.created_at DESC`, [req.uid]);
-  res.json(rows);
+  const requests = await Request.findAll({
+    where: { requesterId: req.uid },
+    include: [
+      {
+        model: Run,
+        as: 'run',
+        attributes: ['storeName'],
+        include: [
+          {
+            model: User,
+            as: 'runner',
+            attributes: ['name', 'phone'],
+          },
+        ],
+      },
+    ],
+    order: [['createdAt', 'DESC']],
+  });
+
+  const response = requests.map((q) => ({
+    id: q.id,
+    runId: q.runId,
+    item: q.item,
+    tip: q.tip,
+    status: q.status,
+    createdAt: q.createdAt,
+    storeName: q.run ? q.run.storeName : null,
+    runnerName: q.run && q.run.runner ? q.run.runner.name : null,
+    runnerPhone:
+      q.status !== 'OPEN' && q.run && q.run.runner
+        ? q.run.runner.phone
+        : null,
+  }));
+
+  res.json(response);
 });
 
-
+// PATCH /requests/:id  { status }
 router.patch('/:id', auth, async (req, res) => {
   const { status } = req.body;
-  if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
 
-  const runnerOwns = 'run_id IN (SELECT id FROM runs WHERE runner_id = $3)';
-  const who = status === 'CANCELLED' ? `(requester_id = $3 OR ${runnerOwns})` : runnerOwns;
+  const request = await Request.findByPk(req.params.id, {
+    include: [{ model: Run, as: 'run', attributes: ['runnerId'] }],
+  });
 
-  const { rows } = await db.query(
-    `UPDATE requests SET status = $1 WHERE id = $2 AND ${who} RETURNING *`,
-    [status, req.params.id, req.uid]
-  );
-  if (!rows[0]) return res.status(403).json({ error: 'Not allowed' });
-  res.json(rows[0]);
+  if (!request) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+
+  const isRunner = request.run && request.run.runnerId === req.uid;
+  const isRequester = request.requesterId === req.uid;
+
+  const canUpdate = status === 'CANCELLED' ? (isRequester || isRunner) : isRunner;
+  if (!canUpdate) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+
+  request.status = status;
+  await request.save();
+
+  res.json({
+    id: request.id,
+    runId: request.runId,
+    requesterId: request.requesterId,
+    item: request.item,
+    tip: request.tip,
+    status: request.status,
+    createdAt: request.createdAt,
+  });
 });
 
 module.exports = router;

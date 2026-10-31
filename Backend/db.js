@@ -1,13 +1,20 @@
-const { Pool } = require('pg');
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-console.log("Database Connected");
-const toCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-async function query(text, params) {
-  const result = await pool.query(text, params);
-  result.rows = result.rows.map((row) =>
-    Object.fromEntries(Object.entries(row).map(([k, v]) => [toCamel(k), v]))
-  );
-  return result;
-}
+const { sequelize, Sequelize, Op, User, Run, Request } = require('./models');
 
-module.exports = { query };
+// Test connection
+sequelize
+  .authenticate()
+  .then(() => {
+    console.log('Database Connected successfully via ORM');
+  })
+  .catch((err) => {
+    console.error('Database connection error:', err.message);
+  });
+
+module.exports = {
+  sequelize,
+  Sequelize,
+  Op,
+  User,
+  Run,
+  Request,
+};

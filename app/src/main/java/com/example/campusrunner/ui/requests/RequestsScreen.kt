@@ -1,19 +1,25 @@
 package com.example.campusrunner.ui.requests
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.campusrunner.data.remote.RequestDto
-import com.example.campusrunner.data.remote.RunDto
 import com.example.campusrunner.data.repository.RequestRepository
 import com.example.campusrunner.ui.components.StatusChip
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,7 +70,6 @@ class RequestsViewModel(private val requestRepository: RequestRepository) : View
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RequestsScreen(
     requestRepository: RequestRepository,
@@ -75,114 +80,109 @@ fun RequestsScreen(
     val mine by viewModel.myRequests.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedFilter by remember { mutableStateOf("All") }
+    val filters = listOf("All", "Open", "Accepted", "Bought")
 
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("CampusRunner - Requests") })
-        },
-        modifier = modifier
-    ) { padding ->
+    val filteredRequests = mine.filter { req ->
+        when (selectedFilter.uppercase()) {
+            "ALL" -> true
+            "OPEN" -> req.status.uppercase() == "OPEN"
+            "ACCEPTED" -> req.status.uppercase() == "ACCEPTED"
+            "BOUGHT" -> req.status.uppercase() == "BOUGHT"
+            else -> true
+        }
+    }
+
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(16.dp)
         ) {
-            TabRow(selectedTabIndex = selectedTab) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Incoming (${incoming.size})") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("My Requests (${mine.size})") })
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "My Requests", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Filter Tabs Row
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(filters) { filter ->
+                    val isSelected = selectedFilter == filter
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isSelected) Color(0xFFEA580C) else Color(0xFFF3F4F6),
+                        modifier = Modifier.clickable { selectedFilter = filter }
+                    ) {
+                        Text(
+                            text = filter,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                            color = if (isSelected) Color.White else Color.DarkGray,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             if (isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = Color(0xFFEA580C))
+                }
+            } else if (filteredRequests.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No requests found.", color = Color.Gray, fontSize = 14.sp)
                 }
             } else {
-                if (selectedTab == 0) {
-                    if (incoming.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No incoming requests for your runs.")
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredRequests) { req ->
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(incoming) { req ->
-                                Card(modifier = Modifier.fillMaxWidth()) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(text = req.item, style = MaterialTheme.typography.titleMedium)
-                                            StatusChip(status = req.status)
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(text = "Store: ${req.storeName ?: "N/A"}", style = MaterialTheme.typography.bodyMedium)
-                                        Text(text = "Requester: ${req.requesterName ?: "Student"} | Tip: \$${req.tip}", style = MaterialTheme.typography.bodySmall)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            if (req.status == "OPEN") {
-                                                Button(onClick = { viewModel.updateStatus(req.id, "ACCEPTED") }) {
-                                                    Text("Accept")
-                                                }
-                                            }
-                                            if (req.status == "ACCEPTED") {
-                                                Button(onClick = { viewModel.updateStatus(req.id, "BOUGHT") }) {
-                                                    Text("Bought")
-                                                }
-                                            }
-                                            if (req.status == "BOUGHT") {
-                                                Button(onClick = { viewModel.updateStatus(req.id, "DELIVERED") }) {
-                                                    Text("Delivered")
-                                                }
-                                            }
-                                            if (req.status != "DELIVERED" && req.status != "CANCELLED") {
-                                                OutlinedButton(onClick = { viewModel.updateStatus(req.id, "CANCELLED") }) {
-                                                    Text("Cancel")
-                                                }
-                                            }
-                                        }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .background(Color(0xFFFFF7ED), RoundedCornerShape(12.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = "📦", fontSize = 20.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column {
+                                        Text(text = req.item, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(text = "Today, 4:20 PM · At: ${req.storeName ?: "Campus Store"}", fontSize = 12.sp, color = Color.Gray)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        StatusChip(status = req.status)
                                     }
                                 }
-                            }
-                        }
-                    }
-                } else {
-                    if (mine.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("You haven't requested anything yet.")
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(mine) { req ->
-                                Card(modifier = Modifier.fillMaxWidth()) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(text = req.item, style = MaterialTheme.typography.titleMedium)
-                                            StatusChip(status = req.status)
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(text = "Store: ${req.storeName ?: "N/A"}", style = MaterialTheme.typography.bodyMedium)
-                                        Text(text = "Runner: ${req.runnerName ?: "Student"} | Tip: \$${req.tip}", style = MaterialTheme.typography.bodySmall)
-                                        if (req.status != "DELIVERED" && req.status != "CANCELLED") {
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            OutlinedButton(onClick = { viewModel.updateStatus(req.id, "CANCELLED") }) {
-                                                Text("Cancel Request")
-                                            }
-                                        }
-                                    }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(text = "₹${req.tip}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFEA580C))
                                 }
                             }
                         }
@@ -191,53 +191,4 @@ fun RequestsScreen(
             }
         }
     }
-}
-
-@Composable
-fun NewRequestDialog(
-    run: RunDto,
-    onDismiss: () -> Unit,
-    onSubmit: (String, Int) -> Unit
-) {
-    var item by remember { mutableStateOf("") }
-    var tipStr by remember { mutableStateOf("2") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Request from ${run.storeName}") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = item,
-                    onValueChange = { item = it },
-                    label = { Text("Item description (e.g. Iced Latte)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = tipStr,
-                    onValueChange = { tipStr = it },
-                    label = { Text("Tip ($)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val tip = tipStr.toIntOrNull() ?: 0
-                    if (item.isNotBlank()) {
-                        onSubmit(item, tip)
-                    }
-                }
-            ) {
-                Text("Submit Request")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }

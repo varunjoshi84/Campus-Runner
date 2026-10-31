@@ -1,7 +1,7 @@
 require('dotenv').config();
-require('express-async-errors'); 
+require('express-async-errors');
 const express = require('express');
-console.log("Server is running")
+
 const app = express();
 app.use(express.json());
 
@@ -13,7 +13,13 @@ app.use('/requests', require('./routes/requests'));
 
 app.use((err, req, res, next) => {
   console.error(err);
-  if (err.code === '22P02') return res.status(400).json({ error: 'Invalid id' }); 
+  if (
+    err.code === '22P02' ||
+    (err.original && err.original.code === '22P02') ||
+    err.name === 'SequelizeDatabaseError' && err.message.includes('invalid input syntax for type uuid')
+  ) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
   res.status(500).json({ error: 'Server error' });
 });
 
