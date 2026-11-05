@@ -20,6 +20,168 @@ Instead of informal, cluttered WhatsApp groups or walking long distances for sma
 
 ---
 
+## 📊 Data Flow Diagrams (DFD)
+
+### 🔹 DFD Level 0 — Context Diagram
+The Level 0 diagram illustrates the external entities interacting with the **Campus Runner System** boundary:
+
+```mermaid
+flowchart TD
+    subgraph External_Entities["👥 External Entities"]
+        Requester["🎒 Student (Requester)<br>Needs Item"]
+        Runner["🏃 Student (Runner)<br>At Store / Canteen"]
+        GoogleAuth["🔑 Google Identity<br>(OAuth 2.0 Service)"]
+    end
+
+    subgraph System["⚡ Campus Runner System"]
+        Core["Campus Runner Core<br>(Android Client + REST API)"]
+    end
+
+    subgraph Storage["🗄️ Database"]
+        DB[("PostgreSQL DB<br>(Supabase)")]
+    end
+
+    GoogleAuth -->|"ID Token / Verification"| Core
+    Requester -->|"Login Credentials / Token"| Core
+    Requester -->|"Item Request & Tip Amount"| Core
+    Requester -->|"Order Cancellation"| Core
+
+    Core -->|"Nearby Active Runs Feed"| Requester
+    Core -->|"Order Status & Runner Phone"| Requester
+
+    Runner -->|"Store Announcement (Lat, Lng)"| Core
+    Runner -->|"Status Updates (Accept, Buy, Deliver)"| Core
+    Runner -->|"End Run Command"| Core
+
+    Core -->|"Incoming Peer Requests Feed"| Runner
+    Core -->|"Requester Contact Phone"| Runner
+
+    Core <-->|"CRUD Operations (Users, Runs, Requests)"| DB
+```
+
+---
+
+### 🔹 DFD Level 1 — Detailed System Processes
+The Level 1 diagram breaks the system down into core functional processes and datastores:
+
+```mermaid
+flowchart LR
+    subgraph Entities["Actors"]
+        Requester["🎒 Requester"]
+        Runner["🏃 Runner"]
+    end
+
+    subgraph Processes["System Processes"]
+        P1["1.0 Auth & Profile<br>JWT & Passwords"]
+        P2["2.0 Run Broadcast<br>GPS Geocoding"]
+        P3["3.0 Request & Tip<br>Order Intake"]
+        P4["4.0 Lifecycle Engine<br>Status Transitions"]
+        P5["5.0 Peer Dialer<br>Contact Exchange"]
+    end
+
+    subgraph DataStores["Data Stores"]
+        D1[("D1: Users")]
+        D2[("D2: Active Runs")]
+        D3[("D3: Orders / Requests")]
+    end
+
+    Requester -->|"Google / Custom Auth"| P1
+    Runner -->|"Google / Custom Auth"| P1
+    P1 <-->|"Verify & Store"| D1
+
+    Runner -->|"Store Name, Lat, Lng"| P2
+    P2 -->|"Record Run (30 min validity)"| D2
+    D2 -->|"Broadcast Nearby (~1 km)"| P3
+    P3 -->|"View Active Store Visits"| Requester
+
+    Requester -->|"Item, Tip, Run ID"| P3
+    P3 -->|"Create Open Request"| D3
+
+    D3 -->|"Notify Incoming Task"| Runner
+    Runner -->|"Accept / Buy / Deliver"| P4
+    P4 -->|"Update Stage"| D3
+    D3 -->|"Sync Live Status"| Requester
+
+    P4 -->|"If Status >= ACCEPTED"| P5
+    P5 -->|"Unlock Runner Phone"| Requester
+    P5 -->|"Unlock Requester Phone"| Runner
+```
+
+---
+
+## 🔄 Order Lifecycle State Machine
+
+Requests move through strict, validated states with authorization guards:
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN: Requester submits item + tip
+    
+    OPEN --> ACCEPTED: Runner accepts request (Locks runner phone & unlocks dialer)
+    OPEN --> CANCELLED: Requester cancels request
+    
+    ACCEPTED --> BOUGHT: Runner purchases item at store
+    BOUGHT --> DELIVERED: Runner hands over item to requester
+    
+    DELIVERED --> [*]: Tip settled peer-to-peer 🎉
+    CANCELLED --> [*]: Order closed ❌
+```
+
+---
+
+## ⚡ End-to-End Sequence Walkthrough
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Requester as 🎒 Requester (Hostel)
+    actor Runner as 🏃 Runner (Canteen)
+    participant Android as 📱 Android App
+    participant API as 🚀 Express Backend
+    participant DB as 🗄️ Supabase Postgres
+
+    Runner->>Android: Taps "Start a Run" at "Campus Mart"
+    Android->>API: POST /runs { storeName, lat, lng }
+    API->>DB: INSERT into runs (expires in 30 mins)
+    API-->>Android: 201 Created (Run active)
+
+    Requester->>Android: Opens Home Screen
+    Android->>API: GET /runs?lat=..&lng=..
+    API->>DB: SELECT active runs within ~1 km box
+    API-->>Android: Returns list of nearby runners
+    Requester->>Android: Requests "Cold Coffee + Blue Pen", Tip: ₹30
+    Android->>API: POST /requests { runId, item, tip }
+    API->>DB: INSERT into requests (status: 'OPEN')
+
+    Runner->>Android: Opens "Runner Tasks" tab
+    Android->>API: GET /requests/incoming
+    API-->>Android: Shows order from Requester (+₹30 Tip)
+    Runner->>Android: Taps "Accept Request"
+    Android->>API: PATCH /requests/:id { status: 'ACCEPTED' }
+    API->>DB: UPDATE status = 'ACCEPTED'
+
+    Note over Requester,Runner: 📞 Phone Dialer Unlocked for direct call coordination
+    Requester->>Android: Views phone number & calls Runner
+    Runner->>Android: Taps "Mark as Bought"
+    Runner->>Android: Delivers item & taps "Confirm Delivered"
+    Android->>API: PATCH /requests/:id { status: 'DELIVERED' }
+    API-->>Android: 200 OK (Cycle Completed)
+```
+
+---
+
+## 🌟 Campus Storylines ("A Day in the Life")
+
+### ☕ Scenario A: The Late-Night Study Session
+> **Aarav** is preparing for exams in Hostel 4 at 11:30 PM. He urgently needs a notebook and highlighters from the night canteen.
+> 
+> 1. Aarav opens **Campus Runner** and spots that **Sneha** has an active run at *Central Convenience Store*.
+> 2. He sends a request: *"1 Register + 2 Highlighters"* with a **₹35 Tip**.
+> 3. Sneha accepts with one tap, buys the items while paying for her own snacks, and calls Aarav via the integrated one-tap dialer upon reaching his hostel gate.
+> 4. Aarav gets his study material without losing 45 minutes of study time; Sneha earns pocket money for zero extra detour.
+
+---
+
 ## ✨ Key Features
 
 ### 🔐 Authentication & Onboarding
@@ -44,6 +206,15 @@ Instead of informal, cluttered WhatsApp groups or walking long distances for sma
 ### 📋 Dual Task Management (Orders & Runner Tasks)
 - **My Orders**: Requesters track incoming purchases with ability to cancel open requests.
 - **Runner Tasks**: Runners accept requests, mark items bought, and confirm delivery.
+
+---
+
+## 🛡️ Security & Privacy Protections
+
+- **Two-Phase Phone Masking**: Student phone numbers are strictly **hidden** during the `OPEN` stage. Phone contacts are only revealed after the runner explicitly accepts the task.
+- **Anti-Self Delivery Check**: Backend rejects students attempting to place orders on their own runs (`runnerId != req.uid`).
+- **Geo-Fenced Expiration**: Runs expire automatically after 30 minutes, keeping discovery feeds fresh.
+- **Password Salting**: Custom passwords hashed with dynamic 16-byte random salts via `crypto.scryptSync`.
 
 ---
 
@@ -179,4 +350,3 @@ node test-flow.js
 
 ## 📄 License
 This project is developed for academic and campus utility purposes.
-
