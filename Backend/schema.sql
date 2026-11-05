@@ -2,12 +2,13 @@
 -- gen_random_uuid() Postgres 13+ mein built-in hai.
 
 CREATE TABLE IF NOT EXISTS users (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  google_id  TEXT UNIQUE NOT NULL,
-  name       TEXT,
-  email      TEXT,
-  phone      TEXT,
-  created_at TIMESTAMP DEFAULT now()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  google_id     TEXT UNIQUE,
+  password_hash TEXT,
+  name          TEXT,
+  email         TEXT UNIQUE,
+  phone         TEXT,
+  created_at    TIMESTAMP DEFAULT now()
 );
 
 -- "I'm at the store" = ek run

@@ -27,6 +27,17 @@ function check(name, condition) {
   check('health', (await call('GET', '/health')).status === 200);
   check('no token -> 401', (await call('GET', '/users/me')).status === 401);
 
+  // Custom Signup & Login test
+  const customEmail = `user${id}@campus.edu`;
+  const signupRes = await call('POST', '/auth/signup', null, { name: 'Custom User', email: customEmail, password: 'password123', phone: '9876543210' });
+  check('custom signup -> 201', signupRes.status === 201 && signupRes.data?.token);
+
+  const loginRes = await call('POST', '/auth/login', null, { email: customEmail, password: 'password123' });
+  check('custom login -> 200', loginRes.status === 200 && loginRes.data?.user?.email === customEmail);
+
+  const badLoginRes = await call('POST', '/auth/login', null, { email: customEmail, password: 'wrongpassword' });
+  check('wrong password -> 401', badLoginRes.status === 401);
+
   // Do users: A = runner, B = requester
   const a = (await call('POST', '/auth/dev', null, { name: 'A Runner', email: `a${id}@x.com` })).data;
   const b = (await call('POST', '/auth/dev', null, { name: 'B Buyer', email: `b${id}@x.com` })).data;

@@ -9,6 +9,12 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface ApiService {
+    @POST("auth/signup")
+    suspend fun signup(@Body request: SignupRequest): Response<AuthResponse>
+
+    @POST("auth/login")
+    suspend fun login(@Body request: CustomLoginRequest): Response<AuthResponse>
+
     @POST("auth/google")
     suspend fun googleLogin(@Body request: GoogleLoginRequest): Response<AuthResponse>
 

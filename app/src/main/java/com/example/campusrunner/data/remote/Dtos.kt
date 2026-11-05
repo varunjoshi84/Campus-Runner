@@ -2,6 +2,8 @@ package com.example.campusrunner.data.remote
 
 data class GoogleLoginRequest(val idToken: String)
 data class DevLoginRequest(val name: String?, val email: String)
+data class SignupRequest(val name: String, val email: String, val password: String, val phone: String? = null)
+data class CustomLoginRequest(val email: String, val password: String)
 
 data class UserDto(
     val id: String,

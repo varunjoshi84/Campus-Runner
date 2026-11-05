@@ -12,6 +12,56 @@ class AuthRepository(
     private val apiService: ApiService,
     private val tokenStore: TokenStore
 ) {
+    suspend fun customSignup(name: String, email: String, password: String, phone: String?): Result<UserDto> = withContext(Dispatchers.IO) {
+        try {
+            val response = apiService.signup(SignupRequest(name, email, password, phone))
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                tokenStore.token = body.token
+                tokenStore.userId = body.user.id
+                tokenStore.userName = body.user.name
+                tokenStore.userEmail = body.user.email
+                tokenStore.userPhone = body.user.phone
+                Result.success(body.user)
+            } else {
+                val errorMsg = try {
+                    val errorBody = response.errorBody()?.string()
+                    org.json.JSONObject(errorBody ?: "").optString("error", "Sign up failed")
+                } catch (e: Exception) {
+                    "Sign up failed"
+                }
+                Result.failure(Exception(errorMsg))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun customLogin(email: String, password: String): Result<UserDto> = withContext(Dispatchers.IO) {
+        try {
+            val response = apiService.login(CustomLoginRequest(email, password))
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                tokenStore.token = body.token
+                tokenStore.userId = body.user.id
+                tokenStore.userName = body.user.name
+                tokenStore.userEmail = body.user.email
+                tokenStore.userPhone = body.user.phone
+                Result.success(body.user)
+            } else {
+                val errorMsg = try {
+                    val errorBody = response.errorBody()?.string()
+                    org.json.JSONObject(errorBody ?: "").optString("error", "Invalid email or password")
+                } catch (e: Exception) {
+                    "Invalid email or password"
+                }
+                Result.failure(Exception(errorMsg))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun googleLogin(idToken: String): Result<UserDto> = withContext(Dispatchers.IO) {
         try {
             val response = apiService.googleLogin(GoogleLoginRequest(idToken))
